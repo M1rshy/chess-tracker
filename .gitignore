@@ -1,0 +1,14 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.codex-remote-attachments/
+original/
+original-backup/
+backup/
+public/engine/*
+public/vendor/*
+*.log
+.env.local
+model-tools/
+model-data/
