@@ -12,3 +12,8 @@ public/vendor/*
 .env.local
 model-tools/
 model-data/
+extension-build/
+extension-test-profile/
+Chess Vision Extension/
+*.zip
+!original-backup/chess-vision-trainer.zip

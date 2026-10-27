@@ -1,0 +1,1 @@
+{"extends":"../tsconfig.json","compilerOptions":{"types":["chrome","vite/client"]},"include":["./*.ts","../src/chess.ts","../src/engine.ts"]}
