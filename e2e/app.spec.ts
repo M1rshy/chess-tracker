@@ -4,6 +4,9 @@ test('real WASM analysis, legal history, undo/redo, FEN, mate and arrows',async(
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('/');
   await expect(page.getByTestId('best-move')).not.toHaveText('—',{timeout:60000});
   await expect(page.getByTestId('depth')).toHaveText('15',{timeout:60000});
+  await page.getByRole('button',{name:'Новая партия',exact:true}).click();
+  await expect(page.getByTestId('best-move')).not.toHaveText('—',{timeout:60000});
+  await expect(page.getByTestId('depth')).toHaveText('15',{timeout:60000});
   await page.getByRole('textbox',{name:'Ход UCI'}).fill('e2e4');await page.getByRole('button',{name:'Сделать ход'}).click();
   await page.getByRole('textbox',{name:'Ход UCI'}).fill('e7e5');await page.getByRole('button',{name:'Сделать ход'}).click();
   await expect(page.getByTestId('move-history')).toContainText('e4');await expect(page.getByTestId('move-history')).toContainText('e5');

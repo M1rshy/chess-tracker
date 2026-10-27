@@ -56,7 +56,7 @@ export default function App() {
   function sync(clearReview=true) {
     const g=game.current;latestFen.current=g.fen();generation.current++;setFen(g.fen());setMoves(g.history({verbose:true}));setSelected(null);setPromotion(null);setAnalysis(null);
     if(clearReview){setReview(null);reviewer.current?.stop();}
-    setStorageError(!write('cvt.game',{pgn:g.pgn()}));setError('');
+    setStorageError(!write('cvt.game',{pgn:g.pgn()}));setError('');setRequest(n=>n+1);
     if(settingsRef.current.auto)setEnabled(true);
   }
   function loadPosition(value:string) {try{const next=validatedGame(value);opponent.current?.stop();game.current=next;redo.current=[];sync();setMode('analysis');setTab('analysis');setNotice('Позиция загружена');}catch(e){setError((e as Error).message);}}
