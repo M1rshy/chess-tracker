@@ -17,7 +17,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     const tabId=sender.tab?.id;if(tabId===undefined)return;
     const key=`job:${tabId}`;
     if(message.type==='analyze'){
-      if(typeof message.id!=='string'||typeof message.fen!=='string'||![8,12,15,18].includes(message.depth))throw new Error('Некорректный запрос анализа');
+      if(typeof message.id!=='string'||typeof message.fen!=='string'||![8,12,15,18].includes(message.depth)||(message.game!==undefined&&!['chess','russian'].includes(message.game)))throw new Error('Некорректный запрос анализа');
       await chrome.storage.session.set({[key]:message.id});await ensureEngine();
       await chrome.runtime.sendMessage({...message,target:'engine',tabId});
     }else if(message.type==='stop'){

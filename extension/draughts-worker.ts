@@ -1,0 +1,2 @@
+import{searchDraughts}from'./draughts-search';
+self.onmessage=({data})=>{try{const a=searchDraughts(data.state,data.key,data.depth,1500,data.prefix,a=>self.postMessage({id:data.id,analysis:a}));self.postMessage({id:data.id,analysis:a,status:'Анализ русских шашек завершён'});}catch(e){self.postMessage({id:data.id,error:e instanceof Error?e.message:'Слишком сложная позиция: превышено время поиска. Подсказка не рассчитана.'});}};

@@ -11,6 +11,7 @@ const errors=[];context.on('weberror',e=>errors.push(e.error().message));
 const html=`<!doctype html><html><head><style>body{margin:0;background:#172014;color:#eef5e4;height:1700px;font:16px system-ui}wc-chess-board,cg-board{display:block;position:relative;width:512px;height:512px;margin:70px 100px;background:conic-gradient(#e7e9dc 25%,#728c6b 0 50%,#e7e9dc 0 75%,#728c6b 0);background-size:128px 128px}.piece,piece{position:absolute;width:64px;height:64px;font:48px/64px serif;text-align:center}.orientation-black{display:contents}</style></head><body><wc-chess-board></wc-chess-board><div id="moves"></div><script>window.clicks=0;document.querySelector('wc-chess-board').addEventListener('click',()=>window.clicks++);</script></body></html>`;
 await context.route('https://www.chess.com/analysis/cvt-test',r=>r.fulfill({contentType:'text/html',body:html}));
 await context.route('https://lichess.org/analysis/cvt-test',r=>r.fulfill({contentType:'text/html',body:html.replace('<wc-chess-board></wc-chess-board>','<div class="cg-wrap orientation-white"><cg-board></cg-board></div>').replace("document.querySelector('wc-chess-board')","document.querySelector('cg-board')")}));
+await context.route('https://lidraughts.org/analysis/russian/cvt-test',r=>r.fulfill({contentType:'text/html',body:html.replace('<wc-chess-board></wc-chess-board>','<div class="cg-wrap orientation-white"><cg-board></cg-board></div><input class="analyse__underboard__fen">').replace("document.querySelector('wc-chess-board')","document.querySelector('cg-board')")}));
 async function render(page,fen,black=false,kind='chesscom',history=[]){
   const pieces=new Chess(fen).board().flat().filter(Boolean).map(p=>({square:p.square,type:p.type,color:p.color}));
   await page.evaluate(({pieces,black,kind,history})=>{
@@ -37,6 +38,10 @@ try{
   game.move('e4');game.move('e5');await render(page,game.fen(),true);
   await expect(host.locator('.current-fen')).toHaveText(game.fen());await expect(overlay).toBeVisible();await expect(host.locator('.progress')).toContainText('15 / 15');
   console.log('PASS: two rapid plies are tracked with correct side, rights and counters.');
+  await host.locator('#my-side').selectOption('b');await expect(overlay).toBeHidden();await expect(host.locator('.best')).toHaveText('Ход соперника');
+  game.move('Nf3');await render(page,game.fen(),true);await expect(overlay).toBeVisible();expect(game.get(await from.getAttribute('data-square')).color).toBe('b');
+  game.move('Nc6');await render(page,game.fen(),true);await expect(overlay).toBeHidden();await expect(host.locator('.best')).toHaveText('Ход соперника');
+  await host.locator('#my-side').selectOption('w');await expect(overlay).toBeVisible();console.log('PASS: only my side receives hints; opponent turns hide frames, arrow and recommendation.');
   await host.locator('#toggle').click();await expect(overlay).toBeHidden();console.log('PASS: pause removes hints.');
   await host.locator('#toggle').click();await expect(overlay).toBeVisible({timeout:60000});
   const mate='6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1';await render(page,mate,false);await expect(overlay).toBeHidden();
@@ -45,5 +50,19 @@ try{
   const lichess=await context.newPage();await lichess.goto('https://lichess.org/analysis/cvt-test');
   const lgame=new Chess();lgame.move('Nf3');lgame.move('d5');lgame.move('g3');await render(lichess,lgame.fen(),true,'lichess',lgame.history());
   const lhost=lichess.locator('#cvt-site-helper');await expect(lhost.locator('.current-fen')).toHaveText(lgame.fen());await expect(lhost.locator('.overlay')).toBeVisible({timeout:60000});await lichess.screenshot({path:'test-results/extension-lichess.png'});console.log('PASS: Chessground orientation and full SAN history recovery.');
-  expect(errors).toEqual([]);console.log('All 6 extension browser checks passed.');
-}finally{await context.close();}
+  const draughts=await context.newPage();await draughts.goto('https://lidraughts.org/analysis/russian/cvt-test');
+  async function renderD(white,black,fen='',flipped=false){await draughts.evaluate(({white,black,fen,flipped})=>{
+    const board=document.querySelector('cg-board');board.parentElement.className='cg-wrap '+(flipped?'orientation-black':'orientation-white');board.replaceChildren();
+    for(const[color,pieces]of[['white',white],['black',black]])for(const text of pieces){const king=text.startsWith('K'),square=king?text.slice(1):text,file=square.charCodeAt(0)-97,rank=Number(square[1]),col=flipped?7-file:file,row=flipped?rank-1:8-rank;const piece=document.createElement('piece');piece.className=`${color} ${king?'king':'man'}`;piece.style.transform=`translate(${col*64}px,${row*64}px)`;piece.textContent=king?'♛':'●';piece.style.color=color==='white'?'#fff':'#111';board.append(piece);}document.querySelector('input.analyse__underboard__fen').value=fen;
+  },{white,black,fen,flipped});}
+  const white=['a3','c3','e3','g3','b2','d2','f2','h2','a1','c1','e1','g1'],black=['b8','d8','f8','h8','a7','c7','e7','g7','b6','d6','f6','h6'];
+  await renderD(white,black);const dh=draughts.locator('#cvt-site-helper'),dOverlay=dh.locator('.overlay');
+  await expect(dOverlay).toBeVisible();await expect(dh.locator('.progress')).toContainText('Шашки');const suggestedFrom=await dh.locator('.from').getAttribute('data-square');expect(white).toContain(suggestedFrom);console.log('PASS: Russian draughts starts automatically and uses the local draughts worker.');
+  white[0]='b4';await renderD(white,black);await expect(dOverlay).toBeHidden();await expect(dh.locator('.best')).toHaveText('Ход соперника');
+  black[8]='a5';await renderD(white,black);await expect(dOverlay).toBeVisible();console.log('PASS: draughts hints disappear on the opponent turn and return on my turn.');
+  await renderD(['c3'],['d4','f6'],'W:Wc3:Bd4,f6:H0:F1');await expect(dh.locator('.from')).toHaveAttribute('data-square','c3');await expect(dh.locator('.to')).toHaveAttribute('data-square','g7');await expect(dh.locator('.waypoint')).toHaveCount(1);await expect(dOverlay).toBeVisible();
+  await draughts.screenshot({path:'test-results/extension-russian.png'});
+  await renderD(['e5'],['f6']);await expect(dh.locator('.from')).toHaveAttribute('data-square','e5');await expect(dh.locator('.to')).toHaveAttribute('data-square','g7');await expect(dOverlay).toBeVisible();
+  await renderD(['g7'],[]);await expect(dOverlay).toBeHidden();await expect(dh.locator('.status')).toHaveText('Победа белых');console.log('PASS: complete multi-capture, remaining jump and terminal outcome are correct.');
+  expect(errors).toEqual([]);console.log('All 10 extension browser checks passed.');
+}catch(error){for(const[pIndex,p]of context.pages().entries()){console.error('Extension diagnostics',await p.locator('#cvt-site-helper').locator('.body').innerText().catch(()=>''));await p.screenshot({path:`test-results/extension-failure-${pIndex}.png`}).catch(()=>{});}throw error;}finally{await context.close();}

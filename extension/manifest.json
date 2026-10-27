@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Chess Vision — подсказки на доске",
-  "version": "1.0.0",
+  "name": "Chess Vision — шахматы и русские шашки",
+  "version": "1.1.0",
   "minimum_chrome_version": "116",
-  "description": "Локальный Stockfish для тренировок: определение доски и ходов, рамки откуда → куда на Chess.com и Lichess.",
+  "description": "Шахматы на Chess.com/Lichess и русские шашки на Lidraughts. Локальный анализ; подсказки только на своём ходу.",
   "permissions": ["storage", "offscreen"],
-  "host_permissions": ["https://*.chess.com/*", "https://lichess.org/*"],
+  "host_permissions": ["https://*.chess.com/*", "https://lichess.org/*", "https://lidraughts.org/*"],
   "background": {"service_worker": "background.js"},
   "action": {"default_title": "Chess Vision", "default_popup": "help.html"},
-  "content_scripts": [{"matches": ["https://*.chess.com/*", "https://lichess.org/*"], "js": ["content.js"], "run_at": "document_idle"}],
+  "content_scripts": [{"matches": ["https://*.chess.com/*", "https://lichess.org/*", "https://lidraughts.org/*"], "js": ["content.js"], "run_at": "document_idle"}],
   "content_security_policy": {"extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"}
 }
