@@ -1,7 +1,26 @@
-import { placement } from '../src/chess';
+import { placement, validatedGame } from '../src/chess';
+import { Chess } from 'chess.js';
 import { isSan, normalizeSan } from './tracker';
 import { draughtsPlacement } from './draughts';
-export type BoardSnapshot={element:HTMLElement;placement:string;black:boolean;kind:string;game:'chess'|'russian'};
+export type BoardSnapshot={element:HTMLElement;placement:string;black:boolean;kind:string;game:'chess'|'russian';evidence?:{fen:string;san?:string[]}};
+const fenSelector='[data-fen],input.fen,textarea.fen,input[name="fen"],textarea[name="fen"],input.analyse__underboard__fen';
+function fullFen(el:HTMLElement){return el.dataset.fen||(el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement?el.value:'');}
+function blindfoldBoard(el:HTMLElement,black:boolean):BoardSnapshot|null{
+  const fens=new Set<string>();
+  for(const node of document.querySelectorAll<HTMLElement>(fenSelector)){
+    const value=fullFen(node).trim();if(value.split(/\s+/).length!==6)continue;
+    try{fens.add(validatedGame(value).fen());}catch{/* Invalid or incomplete FEN is not evidence. */}
+  }
+  if(fens.size>1)return null;
+  let fen=[...fens][0],san:string[]|undefined;
+  if(!fen){
+    const entries=[...document.querySelectorAll<HTMLElement>('[data-ply]')].map(node=>({ply:Number(node.dataset.ply),san:normalizeSan(node.textContent?.trim()||'')})).filter(m=>isSan(m.san)).sort((a,b)=>a.ply-b.ply);
+    // A truncated list showing just the opponent's latest move cannot reconstruct the game.
+    if(!entries.length||entries.some((m,i)=>m.ply!==i+1))return null;
+    try{const game=new Chess();san=entries.map(m=>m.san);for(const move of san)game.move(move);fen=game.fen();}catch{return null;}
+  }
+  return{element:el,placement:fen.split(' ')[0],black,kind:'Chess.com · слепая доска',game:'chess',evidence:{fen,san}};
+}
 export function pageGame(el:HTMLElement,choice:'auto'|'chess'|'russian'='auto'):'chess'|'russian'|null{
   if(choice!=='auto')return choice;
   if(/(?:analysis|variant|editor)\/(?:brazilian|standard|frisian|frysk|antidraughts|breakthrough)(?:\/|$)/.test(location.pathname)&&location.hostname==='lidraughts.org')return null;
@@ -13,11 +32,13 @@ export function findBoard():HTMLElement|null {
   const candidates=[...document.querySelectorAll<HTMLElement>('wc-chess-board,chess-board,.board-layout-chessboard .board,.chessboard,cg-board')];
   return candidates.filter(el=>{const r=el.getBoundingClientRect();return r.width>=160&&r.height>=160&&Math.abs(r.width/r.height-1)<.07&&getComputedStyle(el).visibility!=='hidden';}).sort((a,b)=>b.getBoundingClientRect().width-a.getBoundingClientRect().width)[0]||null;
 }
-export function readBoard(el:HTMLElement,game:'chess'|'russian'='chess'):BoardSnapshot|null {
+export function readBoard(el:HTMLElement,game:'chess'|'russian'='chess',blindfold=false):BoardSnapshot|null {
   const lichess=el.tagName.toLowerCase()==='cg-board';
   const black=lichess?Boolean(el.closest('.orientation-black')):el.classList.contains('flipped')||Boolean(el.closest('.flipped,.orientation-black'));
-  const nodes=[...el.querySelectorAll<HTMLElement>(lichess?'piece':'.piece')].filter(p=>!p.matches('.ghost,.fading,.ghostman,.ghostking')&&getComputedStyle(p).display!=='none');
-  if(!nodes.length||nodes.some(p=>p.matches('.dragging,.anim')))return null;
+  const hiddenPieces=blindfold&&game==='chess'&&!lichess&&/(^|\.)chess\.com$/.test(location.hostname);
+  const nodes=[...el.querySelectorAll<HTMLElement>(lichess?'piece':'.piece')].filter(p=>!p.matches('.ghost,.fading,.ghostman,.ghostking')&&(hiddenPieces||getComputedStyle(p).display!=='none'));
+  if(!nodes.length)return hiddenPieces?blindfoldBoard(el,black):null;
+  if(nodes.some(p=>p.matches('.dragging,.anim')))return null;
   const cells=Array<string>(64).fill('.'),bounds=el.getBoundingClientRect();let count=0;
   for(const piece of nodes){
     let symbol='',file=0,rank=0;
@@ -46,12 +67,13 @@ export function readBoard(el:HTMLElement,game:'chess'|'russian'='chess'):BoardSn
     return{element:el,placement:draughtsPlacement(cells.map(p=>code[p])),black,kind:'Русские шашки 8×8',game};
   }
   if(count<2||cells.filter(p=>p==='K').length!==1||cells.filter(p=>p==='k').length!==1)return null;
-  return{element:el,placement:placement(cells,false),black,kind:lichess?'Lichess / Chessground':'Chess.com',game};
+  return{element:el,placement:placement(cells,false),black,kind:lichess?'Lichess / Chessground':hiddenPieces?'Chess.com · слепая доска':'Chess.com',game};
 }
 export function pageEvidence(board:BoardSnapshot):{fen?:string;san?:string[]} {
+  if(board.evidence)return board.evidence;
   let fen:string|undefined;
-  for(const el of document.querySelectorAll<HTMLElement>('[data-fen],input.fen,textarea.fen,input[name="fen"],textarea[name="fen"],input.analyse__underboard__fen')){
-    const value=el.dataset.fen||(el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement?el.value:'');
+  for(const el of document.querySelectorAll<HTMLElement>(fenSelector)){
+    const value=fullFen(el);
     if(board.game==='russian'&&/^[WB]:[WB]/.test(value)){fen=value.trim();break;}
     if(value?.trim().split(/\s+/).length===6&&value.split(' ')[0]===board.placement){fen=value.trim();break;}
   }

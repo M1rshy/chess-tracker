@@ -1,6 +1,6 @@
 export type Score = { cp: number | null; mate: number | null };
 export type Analysis = Score & { fen: string; depth: number; pv: string[]; best: string; complete: boolean; nodes: number };
-type Task = { fen: string; depth: number; skill: number; resolve: (a: Analysis) => void; reject: (e: Error) => void; update?: (a: Analysis) => void; canceled: boolean; result: Analysis };
+type Task = { fen: string; depth: number; skill: number; searchMoves?: string[]; resolve: (a: Analysis) => void; reject: (e: Error) => void; update?: (a: Analysis) => void; canceled: boolean; result: Analysis };
 export const emptyAnalysis = (fen: string): Analysis => ({ fen, cp: null, mate: null, depth: 0, pv: [], best: '', complete: false, nodes: 0 });
 export function parseInfo(line: string, fen: string): Analysis | null {
   if (!line.startsWith('info ') || !line.includes(' pv ') || /\b(upperbound|lowerbound)\b/.test(line)) return null;
@@ -49,13 +49,16 @@ export class Stockfish {
     if (!task) return;
     if (line.startsWith('info ') && !task.canceled) {
       const info = parseInfo(line, task.fen);
-      if (info && info.depth >= task.result.depth) { task.result = info; task.update?.(info); }
+      if (info && info.depth >= task.result.depth && (!task.searchMoves || task.searchMoves.includes(info.best))) { task.result = info; task.update?.(info); }
     }
     if (line.startsWith('bestmove ')) {
       clearTimeout(this.searchTimer);
       this.active = undefined;
       if (!task.canceled) {
         const best = line.split(' ')[1];
+        if (task.searchMoves && !task.searchMoves.includes(best)) {
+          task.reject(new Error('Stockfish вернул ход вне выбранного списка')); this.pump(); return;
+        }
         task.result = { ...task.result, best: /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(best) ? best : '', complete: true };
         task.update?.(task.result); task.resolve(task.result); this.status('Анализ завершён');
       }
@@ -68,14 +71,15 @@ export class Stockfish {
     this.status('Анализ…');
     this.send(`setoption name Skill Level value ${this.active.skill}`);
     this.send(`position fen ${this.active.fen}`);
-    this.send(`go depth ${this.active.depth}`);
+    this.send(`go depth ${this.active.depth}${this.active.searchMoves ? ` searchmoves ${this.active.searchMoves.join(' ')}` : ''}`);
     this.searchTimer = setTimeout(() => this.fail(new Error('Превышено время анализа. Перезапустите движок.')), 180000);
   }
-  analyze(fen: string, depth = 15, update?: (a: Analysis) => void, skill = 20): Promise<Analysis> {
+  analyze(fen: string, depth = 15, update?: (a: Analysis) => void, skill = 20, searchMoves?: string[]): Promise<Analysis> {
     this.stop();
     if (this.disposed) return Promise.reject(new Error('Stockfish остановлен. Перезапустите движок.'));
+    if (searchMoves && (!searchMoves.length || searchMoves.some(move => !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move)))) return Promise.reject(new Error('Нет допустимых ходов для ограниченного анализа'));
     return new Promise((resolve, reject) => {
-      this.pending = { fen, depth, skill, resolve, reject, update, canceled: false, result: emptyAnalysis(fen) };
+      this.pending = { fen, depth, skill, searchMoves: searchMoves ? [...new Set(searchMoves)] : undefined, resolve, reject, update, canceled: false, result: emptyAnalysis(fen) };
       this.pump();
     });
   }

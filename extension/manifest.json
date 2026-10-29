@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chess Vision — шахматы и русские шашки",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minimum_chrome_version": "116",
   "description": "Шахматы на Chess.com/Lichess и русские шашки на Lidraughts. Локальный анализ; подсказки только на своём ходу.",
   "permissions": ["storage", "offscreen"],

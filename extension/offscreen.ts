@@ -1,4 +1,5 @@
 import { Stockfish } from '../src/engine';
+import { kingMoves } from './king-moves';
 type Entry={engine?:Stockfish;worker?:Worker;id:string;kind:'chess'|'russian'};
 const engines=new Map<number,Entry>();
 function dispose(tabId:number){const e=engines.get(tabId);e?.engine?.dispose();e?.worker?.terminate();engines.delete(tabId);}
@@ -18,7 +19,10 @@ chrome.runtime.onMessage.addListener((m,_sender,reply)=>{
     }
     if(!entry){entry={id:m.id,kind,engine:new Stockfish(status=>{const e=engines.get(m.tabId);if(e)send(m.tabId,e.id,{status});})};engines.set(m.tabId,entry);}
     entry.id=m.id;
-    void entry.engine!.analyze(m.fen,m.depth,a=>{if(engines.get(m.tabId)?.id===m.id)send(m.tabId,m.id,{analysis:a});}).catch(e=>{if(e.name!=='AbortError'&&engines.get(m.tabId)?.id===m.id){send(m.tabId,m.id,{error:e.message});dispose(m.tabId);}});
+    let searchMoves:string[]|undefined;
+    try { if(m.kingOnly)searchMoves=kingMoves(m.fen); }
+    catch { send(m.tabId,m.id,{error:'Не удалось определить легальные ходы короля'});reply({ok:true});return; }
+    void entry.engine!.analyze(m.fen,m.depth,a=>{if(engines.get(m.tabId)?.id===m.id)send(m.tabId,m.id,{analysis:a});},20,searchMoves).catch(e=>{if(e.name!=='AbortError'&&engines.get(m.tabId)?.id===m.id){send(m.tabId,m.id,{error:e.message});dispose(m.tabId);}});
     reply({ok:true});
   }
 });

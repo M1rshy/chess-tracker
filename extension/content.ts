@@ -4,6 +4,7 @@ import { PositionTracker, screenCell,type Tracking } from './tracker';
 import { DraughtsTracker } from './draughts-tracker';
 import type{DraughtsAnalysis}from'./draughts-search';
 import{draughtsFen}from'./draughts';
+import { kingMoves } from './king-moves';
 
 const host=document.createElement('div');host.id='cvt-site-helper';host.style.cssText='position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
 const root=host.attachShadow({mode:'open'});
@@ -15,9 +16,14 @@ root.innerHTML=`<style>
 document.documentElement.append(host);
 const q=<T extends HTMLElement>(s:string)=>root.querySelector<T>(s)!;
 const panel=q('.panel'),overlay=q('.overlay'),status=q('.status'),message=q('.message'),toggle=q<HTMLButtonElement>('#toggle'),depthSelect=q<HTMLSelectElement>('#depth');
+const engineOptions=document.createElement('div');engineOptions.className='options';
+engineOptions.innerHTML='<label>Ходы Stockfish<select id="move-filter" aria-label="Ходы Stockfish"><option value="all">Все фигуры</option><option value="king">Только король</option></select></label><label id="blindfold-option" style="display:flex;align-items:center;gap:5px"><input id="blindfold" type="checkbox" style="width:auto" aria-label="Слепая доска Chess.com">Слепая доска Chess.com</label>';
+q('.controls').after(engineOptions);
+if(!/(^|\.)chess\.com$/.test(location.hostname))q('#blindfold-option').style.display='none';
 const tracker=new PositionTracker(),draughts=new DraughtsTracker(),instance=crypto.randomUUID();
 let enabled=true,depth=15,sequence=0,job='',requestedFen='',latest:(Analysis&Partial<DraughtsAnalysis>)|null=null,board:BoardSnapshot|null=null,boardElement:HTMLElement|null=null;
 let mySide:'auto'|'w'|'b'='auto',autoSide:'w'|'b'|null=null,gameChoice:'auto'|'chess'|'russian'='auto',waypointKey='';
+let kingOnly=false,blindfold=false;
 const sideStorageKey='side:'+location.hostname,gameStorageKey='game:'+location.hostname;
 let stableKey='',stableSince=0,lastSeen='',safe=false,lastEvidenceKey='',previousMove='',acceptedKey='';
 const observer=new MutationObserver(()=>{clear();stableKey='';});
@@ -49,22 +55,26 @@ function paint(){
 }
 function analyze(force=false){
   const c=current(),fen=c?.key;if(!enabled||!fen)return;
+  q<HTMLSelectElement>('#move-filter').disabled=c.kind!=='chess';
   q('.turn').textContent=`${c.turn==='w'?'Ход белых':'Ход чёрных'} · вы: ${playerSide()==='w'?'белые':'чёрные'}`;
   const over=c.kind==='russian'?draughts.outcome():tracker.game!.isGameOver()?(tracker.game!.isCheckmate()?'mate':'draw'):null;
   if(over){if(requestedFen!==fen){stop();requestedFen=fen;}status.textContent=over==='mate'?'Мат':over==='draw'?'Ничья':`Победа ${over==='w'?'белых':'чёрных'}`;q('.best').textContent='Партия завершена';overlay.hidden=true;return;}
   if(!isMyTurn()){if(requestedFen!==fen){stop();requestedFen=fen;}q('.best').textContent='Ход соперника';q('.progress').textContent='Подсказка скрыта до вашего хода';status.textContent='Отслеживаю ход соперника…';overlay.hidden=true;return;}
   if(!force&&fen===requestedFen)return;
+  if(c.kind==='chess'&&kingOnly&&!kingMoves(fen).length){
+    stop();requestedFen=fen;q('.best').textContent='У короля нет легальных ходов';q('.progress').textContent='Только король · расчёт не запускался';status.textContent='Выберите «Все фигуры», чтобы увидеть другие ходы.';status.classList.remove('error');return;
+  }
   latest=null;overlay.hidden=true;requestedFen=fen;job=`${instance}:${++sequence}`;q('.best').textContent='Расчёт…';q('.score').textContent='—';status.textContent='Stockfish анализирует позицию…';status.classList.remove('error');
   status.textContent=c.kind==='russian'?'Локальный движок анализирует русские шашки…':'Stockfish анализирует позицию…';
-  void send('analyze',{id:job,fen,depth,game:c.kind,...(c.kind==='russian'?{state:draughts.state,prefix:draughts.prefix}:{})});
+  void send('analyze',{id:job,fen,depth,game:c.kind,...(c.kind==='russian'?{state:draughts.state,prefix:draughts.prefix}:{kingOnly})});
 }
 chrome.runtime.onMessage.addListener(m=>{
   if(m?.target!=='content'||m.id!==job||!enabled)return;
   if(m.error){clear();status.textContent=m.error;status.classList.add('error');return;}
   if(m.status)status.textContent=m.status;
   const a=m.analysis as (Analysis&Partial<DraughtsAnalysis>)|undefined;if(!a||a.fen!==current()?.key||a.fen!==requestedFen||!isMyTurn())return;
-  if(board?.game==='chess'&&a.best&&!tracker.game!.moves({verbose:true}).some(m=>m.lan===a.best))return;
-  latest=a;q('.score').textContent=a.outcome?(a.outcome==='draw'?'Ничья':`Выигрыш ${a.outcome==='w'?'белых':'чёрных'}`):scoreText(a);q('.best').textContent=a.path?.length?a.path.join(' → '):a.best?`${a.best.slice(0,2)} → ${a.best.slice(2,4)}${a.best[4]?' ='+a.best[4].toUpperCase():''}`:'—';q('.progress').textContent=`${a.kind==='russian'?'Шашки · лимит 1,5 с':'Stockfish'} · глубина ${a.depth} / ${depth} · оценка для белых`;paint();
+  if(board?.game==='chess'&&a.best&&!tracker.game!.moves({verbose:true}).some(m=>m.lan===a.best&&(!kingOnly||m.piece==='k')))return;
+  latest=a;q('.score').textContent=a.outcome?(a.outcome==='draw'?'Ничья':`Выигрыш ${a.outcome==='w'?'белых':'чёрных'}`):scoreText(a);q('.best').textContent=a.path?.length?a.path.join(' → '):a.best?`${a.best.slice(0,2)} → ${a.best.slice(2,4)}${a.best[4]?' ='+a.best[4].toUpperCase():''}`:'—';q('.progress').textContent=`${a.kind==='russian'?'Шашки · лимит 1,5 с':kingOnly?'Stockfish · только король':'Stockfish'} · глубина ${a.depth} / ${depth} · оценка для белых${kingOnly&&a.kind!=='russian'?' среди ходов короля':''}`;paint();
 });
 function tick(){
   if(!host.isConnected)document.documentElement.append(host);
@@ -74,10 +84,10 @@ function tick(){
   if(el!==boardElement){observer.disconnect();stop();resetTrackers();stableKey='';lastSeen='';lastEvidenceKey='';previousMove='';boardElement=el;observer.observe(el,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});if(el.parentElement)observer.observe(el.parentElement,{attributes:true,attributeFilter:['class','style']});}
   const game=pageGame(el,gameChoice);if(!game){clear();status.textContent='Укажите игру: поддерживаются шахматы и русские шашки 8×8.';return;}
   if(board&&board.game!==game){stop();resetTrackers();lastEvidenceKey='';stableKey='';}
-  const snap=readBoard(el,game);if(!snap){clear();status.textContent=enabled?'Ожидаю неподвижную доску 8×8…':'Пауза';stableKey='';return;}
+  const snap=readBoard(el,game,blindfold);if(!snap){if(requestedFen)stop();else clear();status.textContent=enabled?(blindfold?'Слепая доска: нужны данные фигур, полный FEN или полная история с первого хода.':'Ожидаю неподвижную доску 8×8…'):'Пауза';stableKey='';return;}
   board=snap;
   if(!enabled){clear();status.textContent='Пауза';return;}
-  const key=snap.game+'|'+snap.placement+'|'+snap.black;
+  const key=snap.game+'|'+snap.placement+'|'+snap.black+'|'+(snap.evidence?.fen||'');
   if(key!==lastSeen){clear();lastSeen=key;status.textContent='Позиция изменилась, проверяю ход…';}
   if(key!==stableKey){stableKey=key;stableSince=performance.now();return;}
   if(performance.now()-stableSince<240)return;
@@ -99,15 +109,17 @@ function tick(){
 }
 toggle.onclick=()=>{enabled=!enabled;toggle.textContent=enabled?'Пауза':'Включить';void chrome.storage.local.set({enabled});if(!enabled)stop();else{lastEvidenceKey='';stableKey='';requestedFen='';tick();}};
 depthSelect.onchange=()=>{depth=Number(depthSelect.value);void chrome.storage.local.set({depth});analyze(true);};
+q<HTMLSelectElement>('#move-filter').onchange=()=>{kingOnly=q<HTMLSelectElement>('#move-filter').value==='king';void chrome.storage.local.set({kingOnly});stop();lastEvidenceKey='';stableKey='';tick();};
+q<HTMLInputElement>('#blindfold').onchange=()=>{blindfold=q<HTMLInputElement>('#blindfold').checked;void chrome.storage.local.set({blindfold});stop();lastEvidenceKey='';stableKey='';lastSeen='';tick();};
 q<HTMLSelectElement>('#my-side').onchange=()=>{mySide=q<HTMLSelectElement>('#my-side').value as typeof mySide;if(mySide==='auto')autoSide=board?.black?'b':'w';void chrome.storage.local.set({[sideStorageKey]:mySide});stop();lastEvidenceKey='';stableKey='';tick();};
 q<HTMLSelectElement>('#game-kind').onchange=()=>{gameChoice=q<HTMLSelectElement>('#game-kind').value as typeof gameChoice;void chrome.storage.local.set({[gameStorageKey]:gameChoice});stop();resetTrackers();lastEvidenceKey='';stableKey='';tick();};
 q('#refresh').onclick=()=>{stop();resetTrackers();stableKey='';lastEvidenceKey='';previousMove='';tick();};
 q('#collapse').onclick=()=>{const body=q('.body');body.hidden=!body.hidden;panel.classList.toggle('minimized',body.hidden);q('#collapse').textContent=body.hidden?'+':'−';};
 q('#apply').onclick=()=>{
   try{
-    const kind=boardElement&&pageGame(boardElement,gameChoice),snap=boardElement&&kind&&readBoard(boardElement,kind);if(!snap)throw new Error('Сначала откройте неподвижную доску.');
+    const kind=boardElement&&pageGame(boardElement,gameChoice),snap=boardElement&&kind&&readBoard(boardElement,kind,blindfold);if(!snap)throw new Error('Сначала откройте неподвижную доску с данными фигур, FEN или полной историей.');
     stop();(snap.game==='russian'?draughts:tracker).load(q<HTMLInputElement>('#fen').value.trim(),snap.placement);board=snap;safe=true;if(autoSide===null)autoSide=snap.black?'b':'w';lastEvidenceKey='';message.textContent='FEN подтверждён. Дальнейшие ходы определяются автоматически.';requestedFen='';analyze();
   }catch(e){status.textContent=(e as Error).message;status.classList.add('error');}
 };
 addEventListener('scroll',paint,true);addEventListener('resize',paint);document.addEventListener('visibilitychange',()=>{if(document.hidden)clear();else{stableKey='';lastSeen='';}});
-void chrome.storage.local.get({enabled:true,depth:15,[sideStorageKey]:'auto',[gameStorageKey]:'auto'}).then(s=>{enabled=Boolean(s.enabled);depth=[8,12,15,18].includes(s.depth)?s.depth:15;mySide=['w','b'].includes(s[sideStorageKey])?s[sideStorageKey]:'auto';gameChoice=['chess','russian'].includes(s[gameStorageKey])?s[gameStorageKey]:'auto';q<HTMLSelectElement>('#my-side').value=mySide;q<HTMLSelectElement>('#game-kind').value=gameChoice;depthSelect.value=String(depth);toggle.textContent=enabled?'Пауза':'Включить';tick();setInterval(tick,250);}).catch(()=>{tick();setInterval(tick,250);});
+void chrome.storage.local.get({enabled:true,depth:15,kingOnly:false,blindfold:false,[sideStorageKey]:'auto',[gameStorageKey]:'auto'}).then(s=>{enabled=Boolean(s.enabled);depth=[8,12,15,18].includes(s.depth)?s.depth:15;kingOnly=s.kingOnly===true;blindfold=s.blindfold===true;mySide=['w','b'].includes(s[sideStorageKey])?s[sideStorageKey]:'auto';gameChoice=['chess','russian'].includes(s[gameStorageKey])?s[gameStorageKey]:'auto';q<HTMLSelectElement>('#my-side').value=mySide;q<HTMLSelectElement>('#game-kind').value=gameChoice;q<HTMLSelectElement>('#move-filter').value=kingOnly?'king':'all';q<HTMLInputElement>('#blindfold').checked=blindfold;depthSelect.value=String(depth);toggle.textContent=enabled?'Пауза':'Включить';tick();setInterval(tick,250);}).catch(()=>{tick();setInterval(tick,250);});

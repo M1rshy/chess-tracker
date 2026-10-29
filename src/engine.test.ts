@@ -9,6 +9,23 @@ class FakeWorker {
 }
 afterEach(()=>vi.unstubAllGlobals());
 describe('UCI analysis protocol',()=>{
+  it('limits the actual root search and drains the prior unrestricted search',async()=>{
+    vi.stubGlobal('Worker',FakeWorker);const e=new Stockfish(),w=FakeWorker.current;
+    const fen='6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1';w.emit('uciok');w.emit('readyok');
+    const first=e.analyze(fen).catch(e=>e.name),allowed=['g1f1','g1h1'],updates=vi.fn();
+    const next=e.analyze(fen,8,updates,20,allowed);allowed.push('e1e8');
+    w.emit('bestmove e1e8');expect(await first).toBe('AbortError');
+    expect(w.commands.at(-1)).toBe('go depth 8 searchmoves g1f1 g1h1');
+    w.emit('info depth 8 score mate 1 pv e1e8');expect(updates).not.toHaveBeenCalled();
+    w.emit('info depth 8 score cp 30 pv g1f1');w.emit('bestmove g1f1');expect((await next).best).toBe('g1f1');e.dispose();
+  });
+  it('rejects empty restrictions and unexpected non-king engine results',async()=>{
+    vi.stubGlobal('Worker',FakeWorker);const e=new Stockfish(),w=FakeWorker.current;w.emit('uciok');w.emit('readyok');
+    await expect(e.analyze(new Chess().fen(),8,undefined,20,[])).rejects.toThrow('Нет допустимых');
+    expect(w.commands.some(c=>c.startsWith('go '))).toBe(false);
+    const p=e.analyze(new Chess().fen(),8,undefined,20,['e1e2']);w.emit('bestmove e2e4');
+    await expect(p).rejects.toThrow('вне выбранного списка');e.dispose();
+  });
   it('normalizes centipawn and mate scores to White',()=>{
     const w=new Chess().fen(),b=w.replace(' w ',' b ');
     expect(parseInfo('info depth 15 score cp 45 nodes 10 pv e2e4 e7e5',w)?.cp).toBe(45);
